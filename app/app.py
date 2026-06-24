@@ -269,6 +269,26 @@ def add_resident():
         db.close()
 
 
+@app.route('/api/residents/<int:id>', methods=['PUT'])
+def update_resident(id):
+    db = get_db()
+    try:
+        d = request.json
+        cur = db.cursor()
+        cur.execute("""
+            UPDATE residents SET room_id=%s, name=%s, gender=%s, phone=%s,
+                                 id_card=%s, relationship=%s, move_in_date=%s
+            WHERE resident_id=%s
+        """, (d['room_id'], d['name'], d['gender'], d['phone'],
+              d['id_card'], d.get('relationship', '业主'), d['move_in_date'], id))
+        db.commit()
+        return ok({'message': '更新成功'})
+    except Exception as e:
+        return err(str(e))
+    finally:
+        db.close()
+
+
 @app.route('/api/residents/<int:id>/overview')
 def resident_overview(id):
     db = get_db()
@@ -362,6 +382,26 @@ def add_vehicle():
               d.get('vehicle_type', '轿车'), d.get('color', '')))
         db.commit()
         return ok({'id': cur.lastrowid, 'message': '添加成功'})
+    except Exception as e:
+        return err(str(e))
+    finally:
+        db.close()
+
+
+@app.route('/api/vehicles/<int:id>', methods=['PUT'])
+def update_vehicle(id):
+    db = get_db()
+    try:
+        d = request.json
+        cur = db.cursor()
+        cur.execute("""
+            UPDATE vehicles SET resident_id=%s, space_id=%s, plate_no=%s,
+                                vehicle_type=%s, color=%s
+            WHERE vehicle_id=%s
+        """, (d['resident_id'], d.get('space_id'), d['plate_no'],
+              d.get('vehicle_type', '轿车'), d.get('color', ''), id))
+        db.commit()
+        return ok({'message': '更新成功'})
     except Exception as e:
         return err(str(e))
     finally:
@@ -603,6 +643,26 @@ def add_announcement():
         db.close()
 
 
+@app.route('/api/announcements/<int:id>', methods=['PUT'])
+def update_announcement(id):
+    db = get_db()
+    try:
+        d = request.json
+        cur = db.cursor()
+        cur.execute("""
+            UPDATE announcements SET title=%s, content=%s, ann_type=%s,
+                                     publisher=%s, is_top=%s
+            WHERE announcement_id=%s
+        """, (d['title'], d['content'], d.get('ann_type', '通知'),
+              d.get('publisher', '物业服务中心'), d.get('is_top', False), id))
+        db.commit()
+        return ok({'message': '更新成功'})
+    except Exception as e:
+        return err(str(e))
+    finally:
+        db.close()
+
+
 @app.route('/api/announcements/<int:id>', methods=['DELETE'])
 def del_announcement(id):
     db = get_db()
@@ -712,7 +772,15 @@ def update_staff(id):
     try:
         d = request.json
         cur = db.cursor()
-        cur.execute('UPDATE staff SET status=%s WHERE staff_id=%s', (d['status'], id))
+        if 'name' in d:
+            cur.execute("""
+                UPDATE staff SET name=%s, gender=%s, phone=%s, role=%s,
+                                 salary=%s, status=%s
+                WHERE staff_id=%s
+            """, (d['name'], d.get('gender', '男'), d['phone'], d['role'],
+                  d.get('salary', 0), d.get('status', '在职'), id))
+        else:
+            cur.execute('UPDATE staff SET status=%s WHERE staff_id=%s', (d['status'], id))
         db.commit()
         return ok({'message': '更新成功'})
     except Exception as e:

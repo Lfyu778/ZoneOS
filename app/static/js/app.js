@@ -119,7 +119,7 @@ async function renderBuildings() {
         ${data.map(r => `<tr>
           <td>${r.building_id}</td><td class="font-medium">${r.building_name}</td><td>${r.total_floors}</td>
           <td>${r.address || '-'}</td><td>${r.unit_count}</td><td>${r.room_count}</td>
-          <td><button class="btn btn-sm btn-danger" onclick="delBuilding(${r.building_id})">删除</button></td>
+          <td><button class="btn btn-sm btn-primary" onclick="editBuildingForm(${r.building_id},'${r.building_name}',${r.total_floors},'${r.address || ''}')">编辑</button> <button class="btn btn-sm btn-danger" onclick="delBuilding(${r.building_id})">删除</button></td>
         </tr>`).join('')}
       </table>
     </div>`;
@@ -132,6 +132,16 @@ function addBuildingForm() {
   `, async () => {
     await api('/buildings', 'POST', { building_name: $('#f-bname').value, total_floors: +$('#f-bfloors').value, address: $('#f-baddr').value });
     toast('添加成功'); renderBuildings();
+  });
+}
+function editBuildingForm(id, name, floors, addr) {
+  openModal('编辑楼栋', `
+    <div class="form-group"><label>楼栋名称</label><input id="f-bname" value="${name}"></div>
+    <div class="form-group"><label>总楼层</label><input id="f-bfloors" type="number" value="${floors}"></div>
+    <div class="form-group"><label>地址描述</label><input id="f-baddr" value="${addr}"></div>
+  `, async () => {
+    await api(`/buildings/${id}`, 'PUT', { building_name: $('#f-bname').value, total_floors: +$('#f-bfloors').value, address: $('#f-baddr').value });
+    toast('更新成功'); renderBuildings();
   });
 }
 async function delBuilding(id) { if (!confirm('确认删除？')) return; await api(`/buildings/${id}`, 'DELETE'); toast('已删除'); renderBuildings(); }
@@ -182,7 +192,7 @@ async function renderResidents() {
           <td>${r.resident_id}</td><td class="font-medium">${r.name}</td><td>${badge(r.gender)}</td>
           <td>${r.phone}</td><td>${r.full_address}</td><td>${badge(r.relationship)}</td>
           <td>${r.move_in_date}</td>
-          <td><button class="btn btn-sm btn-primary" onclick="viewResident(${r.resident_id})">详情</button></td>
+          <td><button class="btn btn-sm btn-primary" onclick="editResidentForm(${r.resident_id})">编辑</button> <button class="btn btn-sm btn-info" onclick="viewResident(${r.resident_id})">详情</button></td>
         </tr>`).join('')}
       </table>
     </div>`;
@@ -230,6 +240,26 @@ async function viewResident(id) {
   `, () => {});
   $('#modal-submit').textContent = '关闭';
 }
+async function editResidentForm(id) {
+  const d = await api(`/residents/${id}/overview`);
+  const info = d.info || {};
+  const rooms = await api('/rooms');
+  openModal('编辑住户', `
+    <div class="form-group"><label>房屋</label><select id="f-room">${rooms.map(r => `<option value="${r.room_id}">${r.full_address} (${r.area}m²)</option>`).join('')}</select></div>
+    <div class="form-group"><label>姓名</label><input id="f-rname" value="${info.name || ''}"></div>
+    <div class="form-group"><label>性别</label><select id="f-rgender"><option ${info.gender==='男'?'selected':''}>男</option><option ${info.gender==='女'?'selected':''}>女</option></select></div>
+    <div class="form-group"><label>电话</label><input id="f-rphone" value="${info.phone || ''}"></div>
+    <div class="form-group"><label>身份证号</label><input id="f-ridcard" maxlength="18" value="${info.id_card || ''}"></div>
+    <div class="form-group"><label>身份</label><select id="f-rrel"><option value="业主" ${info.relationship==='业主'?'selected':''}>业主</option><option value="家属" ${info.relationship==='家属'?'selected':''}>家属</option><option value="租客" ${info.relationship==='租客'?'selected':''}>租客</option></select></div>
+    <div class="form-group"><label>入住日期</label><input id="f-rdate" type="date" value="${info.move_in_date || ''}"></div>
+  `, async () => {
+    await api(`/residents/${id}`, 'PUT', {
+      room_id: +$('#f-room').value, name: $('#f-rname').value, gender: $('#f-rgender').value,
+      phone: $('#f-rphone').value, id_card: $('#f-ridcard').value, relationship: $('#f-rrel').value, move_in_date: $('#f-rdate').value
+    });
+    toast('更新成功'); renderResidents();
+  });
+}
 
 // ======================== 车位管理 ========================
 async function renderParking() {
@@ -265,10 +295,11 @@ async function renderVehicles() {
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>车牌号</th><th>车辆类型</th><th>颜色</th><th>车主</th><th>绑定车位</th></tr>
+        <tr><th>ID</th><th>车牌号</th><th>车辆类型</th><th>颜色</th><th>车主</th><th>绑定车位</th><th>操作</th></tr>
         ${data.map(r => `<tr>
           <td>${r.vehicle_id}</td><td class="font-medium">${r.plate_no}</td><td>${badge(r.vehicle_type)}</td>
           <td>${r.color || '-'}</td><td>${r.resident_name}</td><td>${r.space_number || '未绑定'}</td>
+          <td><button class="btn btn-sm btn-primary" onclick="editVehicleForm(${r.vehicle_id})">编辑</button></td>
         </tr>`).join('')}
       </table>
     </div>`;
@@ -283,6 +314,24 @@ async function addVehicleForm() {
   `, async () => {
     await api('/vehicles', 'POST', { resident_id: +$('#f-vres').value, plate_no: $('#f-vplate').value, vehicle_type: $('#f-vtype').value, color: $('#f-vcolor').value });
     toast('登记成功'); renderVehicles();
+  });
+}
+function editVehicleForm(id) {
+  const cars = vehicleCache ? vehicleCache : null;
+  api('/vehicles').then(all => {
+    const v = all.find(x => x.vehicle_id === id);
+    if (!v) return;
+    api('/residents').then(residents => {
+      openModal('编辑车辆', `
+        <div class="form-group"><label>车主</label><select id="f-vres">${residents.map(r => `<option value="${r.resident_id}" ${r.resident_id===v.resident_id?'selected':''}>${r.name} (${r.full_address})</option>`).join('')}</select></div>
+        <div class="form-group"><label>车牌号</label><input id="f-vplate" value="${v.plate_no}"></div>
+        <div class="form-group"><label>车辆类型</label><select id="f-vtype"><option ${v.vehicle_type==='轿车'?'selected':''}>轿车</option><option ${v.vehicle_type==='SUV'?'selected':''}>SUV</option><option ${v.vehicle_type==='电动车'?'selected':''}>电动车</option><option ${v.vehicle_type==='摩托车'?'selected':''}>摩托车</option></select></div>
+        <div class="form-group"><label>颜色</label><input id="f-vcolor" value="${v.color || ''}"></div>
+      `, async () => {
+        await api(`/vehicles/${id}`, 'PUT', { resident_id: +$('#f-vres').value, plate_no: $('#f-vplate').value, vehicle_type: $('#f-vtype').value, color: $('#f-vcolor').value });
+        toast('更新成功'); renderVehicles();
+      });
+    });
   });
 }
 
@@ -478,7 +527,10 @@ async function renderAnnouncements() {
               ${a.is_top ? '<span class="badge badge-red">置顶</span>' : ''}
               <span class="font-semibold">${a.title}</span>
             </div>
-            <button class="btn btn-sm btn-danger" onclick="delAnnouncement(${a.announcement_id})">删除</button>
+            <div>
+              <button class="btn btn-sm btn-primary" onclick="editAnnouncementForm(${a.announcement_id})">编辑</button>
+              <button class="btn btn-sm btn-danger" onclick="delAnnouncement(${a.announcement_id})">删除</button>
+            </div>
           </div>
           <p class="text-sm text-gray-600 mt-2 leading-relaxed">${a.content}</p>
           <div class="text-xs text-gray-400 mt-2">${new Date(a.created_at).toLocaleString('zh-CN')} · ${a.publisher}</div>
@@ -502,6 +554,24 @@ function addAnnouncementForm() {
   });
 }
 async function delAnnouncement(id) { if (!confirm('确认删除？')) return; await api(`/announcements/${id}`, 'DELETE'); toast('已删除'); renderAnnouncements(); }
+async function editAnnouncementForm(id) {
+  const all = await api('/announcements');
+  const a = all.find(x => x.announcement_id === id);
+  if (!a) return;
+  openModal('编辑公告', `
+    <div class="form-group"><label>标题</label><input id="f-atitle" value="${a.title.replace(/"/g,'&quot;')}"></div>
+    <div class="form-group"><label>内容</label><textarea id="f-acontent" rows="4">${a.content}</textarea></div>
+    <div class="form-group"><label>类型</label><select id="f-atype"><option ${a.ann_type==='通知'?'selected':''}>通知</option><option ${a.ann_type==='公告'?'selected':''}>公告</option><option ${a.ann_type==='活动'?'selected':''}>活动</option><option ${a.ann_type==='紧急'?'selected':''}>紧急</option></select></div>
+    <div class="form-group"><label>发布人</label><input id="f-apub" value="${a.publisher}"></div>
+    <div class="form-group"><label><input type="checkbox" id="f-atop" ${a.is_top?'checked':''}> 置顶</label></div>
+  `, async () => {
+    await api(`/announcements/${id}`, 'PUT', {
+      title: $('#f-atitle').value, content: $('#f-acontent').value, ann_type: $('#f-atype').value,
+      publisher: $('#f-apub').value, is_top: $('#f-atop').checked
+    });
+    toast('更新成功'); renderAnnouncements();
+  });
+}
 
 // ======================== 访客登记 ========================
 async function renderVisitors() {
@@ -557,7 +627,7 @@ async function renderStaff() {
           <td>${s.staff_id}</td><td class="font-medium">${s.name}</td><td>${badge(s.gender)}</td>
           <td>${s.phone}</td><td>${badge(s.role)}</td><td>¥${s.salary}</td>
           <td>${s.hire_date}</td><td>${badge(s.status)}</td>
-          <td>${s.status === '在职' ? `<button class="btn btn-sm btn-danger" onclick="resignStaff(${s.staff_id})">离职</button>` : ''}</td>
+          <td><button class="btn btn-sm btn-primary" onclick="editStaffForm(${s.staff_id})">编辑</button> ${s.status === '在职' ? `<button class="btn btn-sm btn-danger" onclick="resignStaff(${s.staff_id})">离职</button>` : ''}</td>
         </tr>`).join('')}
       </table>
     </div>`;
@@ -579,6 +649,22 @@ function addStaffForm() {
   });
 }
 async function resignStaff(id) { if (!confirm('确认办理离职？')) return; await api(`/staff/${id}`, 'PUT', { status: '离职' }); toast('已更新'); renderStaff(); }
+async function editStaffForm(id) {
+  const all = await api('/staff');
+  const s = all.find(x => x.staff_id === id);
+  if (!s) return;
+  openModal('编辑员工', `
+    <div class="form-group"><label>姓名</label><input id="f-sname" value="${s.name}"></div>
+    <div class="form-group"><label>性别</label><select id="f-sgender"><option ${s.gender==='男'?'selected':''}>男</option><option ${s.gender==='女'?'selected':''}>女</option></select></div>
+    <div class="form-group"><label>电话</label><input id="f-sphone" value="${s.phone}"></div>
+    <div class="form-group"><label>岗位</label><select id="f-srole"><option ${s.role==='经理'?'selected':''}>经理</option><option ${s.role==='维修工'?'selected':''}>维修工</option><option ${s.role==='保安'?'selected':''}>保安</option><option ${s.role==='保洁'?'selected':''}>保洁</option></select></div>
+    <div class="form-group"><label>薪资</label><input id="f-ssalary" type="number" value="${s.salary}"></div>
+    <div class="form-group"><label>状态</label><select id="f-sstatus"><option value="在职" ${s.status==='在职'?'selected':''}>在职</option><option value="离职" ${s.status==='离职'?'selected':''}>离职</option></select></div>
+  `, async () => {
+    await api(`/staff/${id}`, 'PUT', { name: $('#f-sname').value, gender: $('#f-sgender').value, phone: $('#f-sphone').value, role: $('#f-srole').value, salary: +$('#f-ssalary').value, status: $('#f-sstatus').value });
+    toast('更新成功'); renderStaff();
+  });
+}
 
 // ======================== 初始化 ========================
 loadPage('dashboard');
