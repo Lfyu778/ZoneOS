@@ -8,3 +8,6 @@ DB_CONFIG = {
     'charset': 'utf8mb4',
     'cursorclass': 'dict',
 }
+
+# Flask Session 密钥
+SECRET_KEY = 'community-property-2026-secret-key'

@@ -521,3 +521,13 @@ BEGIN
     ORDER BY created_at DESC LIMIT 5;
 END$$
 DELIMITER ;
+
+-- ======================== 用户登录表 ========================
+CREATE TABLE IF NOT EXISTS users (
+    user_id       INT PRIMARY KEY AUTO_INCREMENT COMMENT '用户ID',
+    username      VARCHAR(50)  NOT NULL UNIQUE COMMENT '用户名',
+    password_hash VARCHAR(255) NOT NULL COMMENT '密码哈希',
+    role          ENUM('admin','user') NOT NULL DEFAULT 'user' COMMENT '角色：admin管理员 / user普通用户',
+    nickname      VARCHAR(50) DEFAULT '' COMMENT '显示昵称',
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统登录用户';

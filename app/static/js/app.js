@@ -4,10 +4,22 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const content = () => $('#content');
 
+// 当前登录用户信息
+let currentUser = null;
+
+// 判断是否为管理员，返回 HTML 或空字符串
+function adminOnly(html) {
+  return currentUser && currentUser.role === 'admin' ? html : '';
+}
+
 async function api(path, method = 'GET', body = null) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
+  if (res.status === 401) {
+    showLogin();
+    throw new Error('未登录');
+  }
   return res.json();
 }
 
@@ -54,6 +66,91 @@ function updateTime() {
 setInterval(updateTime, 1000);
 updateTime();
 
+// ======================== 登录 / 登出 ========================
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    const data = await res.json();
+    if (data.user_id) {
+      currentUser = data;
+      showApp();
+    } else {
+      showLogin();
+    }
+  } catch (e) {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  currentUser = null;
+  $('#login-overlay').classList.remove('hidden');
+  $('#sidebar').classList.add('hidden');
+  $('#main-area').classList.add('hidden');
+  $('#login-username').value = '';
+  $('#login-password').value = '';
+  $('#login-error').classList.add('hidden');
+  $('#login-username').focus();
+}
+
+function showApp() {
+  $('#login-overlay').classList.add('hidden');
+  $('#sidebar').classList.remove('hidden');
+  $('#main-area').classList.remove('hidden');
+  // 更新侧边栏用户信息
+  $('#user-nickname').textContent = currentUser.nickname || currentUser.username;
+  $('#user-role-label').textContent = currentUser.role === 'admin' ? '管理员' : '普通用户';
+  $('#user-avatar').textContent = (currentUser.nickname || currentUser.username).charAt(0).toUpperCase();
+  // 加载控制台
+  $$('.nav-item').forEach(n => n.classList.remove('active'));
+  $$('.nav-item')[0].classList.add('active');
+  $('#page-title').textContent = '控制台';
+  loadPage('dashboard');
+}
+
+async function doLogin() {
+  const username = $('#login-username').value.trim();
+  const password = $('#login-password').value;
+  if (!username || !password) {
+    $('#login-error').textContent = '请输入用户名和密码';
+    $('#login-error').classList.remove('hidden');
+    return;
+  }
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (data.error) {
+      $('#login-error').textContent = data.error;
+      $('#login-error').classList.remove('hidden');
+      return;
+    }
+    currentUser = data;
+    showApp();
+  } catch (e) {
+    $('#login-error').textContent = '网络错误，请重试';
+    $('#login-error').classList.remove('hidden');
+  }
+}
+
+async function doLogout() {
+  try {
+    await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch (e) {}
+  showLogin();
+}
+
+// 回车键登录
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !$('#login-overlay').classList.contains('hidden')) {
+    doLogin();
+  }
+});
+
 // ======================== 导航 ========================
 $$('.nav-item').forEach(item => {
   item.addEventListener('click', (e) => {
@@ -74,7 +171,9 @@ async function loadPage(page) {
     fees: renderFees, repairs: renderRepairs, complaints: renderComplaints,
     announcements: renderAnnouncements, visitors: renderVisitors, staff: renderStaff
   };
-  if (pages[page]) await pages[page]();
+  if (pages[page]) {
+    try { await pages[page](); } catch (e) { /* 401 已在 api() 中处理 */ }
+  }
 }
 
 // ======================== 控制台 ========================
@@ -82,18 +181,18 @@ async function renderDashboard() {
   const d = await api('/dashboard');
   content().innerHTML = `
     <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="stat-card"><div class="stat-icon bg-blue-100 text-blue-600"><i class="ri-building-line"></i></div><div><div class="text-2xl font-bold">${d.buildings}</div><div class="text-sm text-gray-500">楼栋</div></div></div>
-      <div class="stat-card"><div class="stat-icon bg-green-100 text-green-600"><i class="ri-home-4-line"></i></div><div><div class="text-2xl font-bold">${d.rooms.occupied}/${d.rooms.total}</div><div class="text-sm text-gray-500">已入住/总房屋</div></div></div>
-      <div class="stat-card"><div class="stat-icon bg-purple-100 text-purple-600"><i class="ri-user-line"></i></div><div><div class="text-2xl font-bold">${d.residents}</div><div class="text-sm text-gray-500">住户人数</div></div></div>
-      <div class="stat-card"><div class="stat-icon bg-yellow-100 text-yellow-600"><i class="ri-parking-box-line"></i></div><div><div class="text-2xl font-bold">${d.parking.available}/${d.parking.total}</div><div class="text-sm text-gray-500">空闲/总车位</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-blue-100 text-blue-600">🏗️</div><div><div class="text-2xl font-bold">${d.buildings}</div><div class="text-sm text-gray-500">楼栋</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-green-100 text-green-600">🏠</div><div><div class="text-2xl font-bold">${d.rooms.occupied}/${d.rooms.total}</div><div class="text-sm text-gray-500">已入住/总房屋</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-purple-100 text-purple-600">👤</div><div><div class="text-2xl font-bold">${d.residents}</div><div class="text-sm text-gray-500">住户人数</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-yellow-100 text-yellow-600">🅿️</div><div><div class="text-2xl font-bold">${d.parking.available}/${d.parking.total}</div><div class="text-sm text-gray-500">空闲/总车位</div></div></div>
     </div>
     <div class="grid grid-cols-3 gap-4 mb-6">
-      <div class="stat-card"><div class="stat-icon bg-red-100 text-red-600"><i class="ri-tools-line"></i></div><div><div class="text-2xl font-bold">${d.repairs.pending}</div><div class="text-sm text-gray-500">待处理报修</div></div></div>
-      <div class="stat-card"><div class="stat-icon bg-orange-100 text-orange-600"><i class="ri-chat-smile-line"></i></div><div><div class="text-2xl font-bold">${d.complaints.pending}</div><div class="text-sm text-gray-500">待处理投诉</div></div></div>
-      <div class="stat-card"><div class="stat-icon bg-pink-100 text-pink-600"><i class="ri-money-cny-circle-line"></i></div><div><div class="text-2xl font-bold">${d.fees.unpaid}</div><div class="text-sm text-gray-500">未缴费用笔数</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-red-100 text-red-600">🔧</div><div><div class="text-2xl font-bold">${d.repairs.pending}</div><div class="text-sm text-gray-500">待处理报修</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-orange-100 text-orange-600">💬</div><div><div class="text-2xl font-bold">${d.complaints.pending}</div><div class="text-sm text-gray-500">待处理投诉</div></div></div>
+      <div class="stat-card"><div class="stat-icon bg-pink-100 text-pink-600">💰</div><div><div class="text-2xl font-bold">${d.fees.unpaid}</div><div class="text-sm text-gray-500">未缴费用笔数</div></div></div>
     </div>
     <div class="card">
-      <h3 class="font-semibold mb-3 text-gray-700"><i class="ri-megaphone-line mr-1"></i>最新公告</h3>
+      <h3 class="font-semibold mb-3 text-gray-700">📢 最新公告</h3>
       <div class="space-y-2">
         ${d.announcements.map(a => `
           <div class="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50">
@@ -111,15 +210,15 @@ async function renderBuildings() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 栋</span>
-      <button class="btn btn-primary" onclick="addBuildingForm()"><i class="ri-add-line"></i>新增楼栋</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addBuildingForm()">➕ 新增楼栋</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>楼栋名称</th><th>总楼层</th><th>地址</th><th>单元数</th><th>房屋数</th><th>操作</th></tr>
+        <tr><th>ID</th><th>楼栋名称</th><th>总楼层</th><th>地址</th><th>单元数</th><th>房屋数</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(r => `<tr>
           <td>${r.building_id}</td><td class="font-medium">${r.building_name}</td><td>${r.total_floors}</td>
           <td>${r.address || '-'}</td><td>${r.unit_count}</td><td>${r.room_count}</td>
-          <td><button class="btn btn-sm btn-primary" onclick="editBuildingForm(${r.building_id},'${r.building_name}',${r.total_floors},'${r.address || ''}')">编辑</button> <button class="btn btn-sm btn-danger" onclick="delBuilding(${r.building_id})">删除</button></td>
+          ${adminOnly(`<td><button class="btn btn-sm btn-primary" onclick="editBuildingForm(${r.building_id},'${r.building_name}',${r.total_floors},'${r.address || ''}')">编辑</button> <button class="btn btn-sm btn-danger" onclick="delBuilding(${r.building_id})">删除</button></td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -152,7 +251,7 @@ async function renderRooms() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 间</span>
-      <button class="btn btn-primary" onclick="addRoomForm()"><i class="ri-add-line"></i>新增房屋</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addRoomForm()">➕ 新增房屋</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
@@ -183,16 +282,16 @@ async function renderResidents() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 人</span>
-      <button class="btn btn-primary" onclick="addResidentForm()"><i class="ri-add-line"></i>新增住户</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addResidentForm()">➕ 新增住户</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>姓名</th><th>性别</th><th>电话</th><th>地址</th><th>身份</th><th>入住日期</th><th>操作</th></tr>
+        <tr><th>ID</th><th>姓名</th><th>性别</th><th>电话</th><th>地址</th><th>身份</th><th>入住日期</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(r => `<tr>
           <td>${r.resident_id}</td><td class="font-medium">${r.name}</td><td>${badge(r.gender)}</td>
           <td>${r.phone}</td><td>${r.full_address}</td><td>${badge(r.relationship)}</td>
           <td>${r.move_in_date}</td>
-          <td><button class="btn btn-sm btn-primary" onclick="editResidentForm(${r.resident_id})">编辑</button> <button class="btn btn-sm btn-info" onclick="viewResident(${r.resident_id})">详情</button></td>
+          ${adminOnly(`<td><button class="btn btn-sm btn-primary" onclick="editResidentForm(${r.resident_id})">编辑</button> <button class="btn btn-sm btn-info" onclick="viewResident(${r.resident_id})">详情</button></td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -291,15 +390,15 @@ async function renderVehicles() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 辆</span>
-      <button class="btn btn-primary" onclick="addVehicleForm()"><i class="ri-add-line"></i>登记车辆</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addVehicleForm()">➕ 登记车辆</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>车牌号</th><th>车辆类型</th><th>颜色</th><th>车主</th><th>绑定车位</th><th>操作</th></tr>
+        <tr><th>ID</th><th>车牌号</th><th>车辆类型</th><th>颜色</th><th>车主</th><th>绑定车位</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(r => `<tr>
           <td>${r.vehicle_id}</td><td class="font-medium">${r.plate_no}</td><td>${badge(r.vehicle_type)}</td>
           <td>${r.color || '-'}</td><td>${r.resident_name}</td><td>${r.space_number || '未绑定'}</td>
-          <td><button class="btn btn-sm btn-primary" onclick="editVehicleForm(${r.vehicle_id})">编辑</button></td>
+          ${adminOnly(`<td><button class="btn btn-sm btn-primary" onclick="editVehicleForm(${r.vehicle_id})">编辑</button></td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -317,7 +416,6 @@ async function addVehicleForm() {
   });
 }
 function editVehicleForm(id) {
-  const cars = vehicleCache ? vehicleCache : null;
   api('/vehicles').then(all => {
     const v = all.find(x => x.vehicle_id === id);
     if (!v) return;
@@ -349,19 +447,19 @@ async function renderFees() {
         </select>
       </div>
       <div class="flex gap-2">
-        <button class="btn btn-success" onclick="generateFees()"><i class="ri-file-add-line"></i>生成月度账单</button>
-        <button class="btn btn-primary" onclick="viewFeeReport()"><i class="ri-bar-chart-line"></i>月度报表</button>
+        ${adminOnly('<button class="btn btn-success" onclick="generateFees()">📄 生成月度账单</button>')}
+        <button class="btn btn-primary" onclick="viewFeeReport()">📊 月度报表</button>
       </div>
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>住户</th><th>地址</th><th>费用类别</th><th>应缴</th><th>已缴</th><th>周期</th><th>状态</th><th>操作</th></tr>
+        <tr><th>ID</th><th>住户</th><th>地址</th><th>费用类别</th><th>应缴</th><th>已缴</th><th>周期</th><th>状态</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         <tbody id="fee-table">
         ${data.map(r => `<tr data-period="${r.fee_period}">
           <td>${r.fee_id}</td><td>${r.resident_name}</td><td class="text-xs">${r.full_address}</td>
           <td>${r.category_name}</td><td>¥${r.amount}</td><td>¥${r.paid_amount}</td>
           <td>${r.fee_period}</td><td>${badge(r.status)}</td>
-          <td>${r.status !== '已缴' ? `<button class="btn btn-sm btn-success" onclick="payFee(${r.fee_id},${r.amount - r.paid_amount})">缴费</button>` : '-'}</td>
+          ${adminOnly(`<td>${r.status !== '已缴' ? `<button class="btn btn-sm btn-success" onclick="payFee(${r.fee_id},${r.amount - r.paid_amount})">缴费</button>` : '-'}</td>`)}
         </tr>`).join('')}
         </tbody>
       </table>
@@ -419,16 +517,16 @@ async function renderRepairs() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 条</span>
-      <button class="btn btn-primary" onclick="addRepairForm()"><i class="ri-add-line"></i>新建工单</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addRepairForm()">➕ 新建工单</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>标题</th><th>住户</th><th>地址</th><th>优先级</th><th>状态</th><th>维修人员</th><th>时间</th><th>操作</th></tr>
+        <tr><th>ID</th><th>标题</th><th>住户</th><th>地址</th><th>优先级</th><th>状态</th><th>维修人员</th><th>时间</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(r => `<tr>
           <td>${r.order_id}</td><td class="font-medium">${r.title}</td><td>${r.resident_name}</td>
           <td class="text-xs">${r.full_address}</td><td>${badge(r.priority)}</td><td>${badge(r.status)}</td>
           <td>${r.staff_name || '-'}</td><td class="text-xs">${new Date(r.created_at).toLocaleDateString()}</td>
-          <td class="flex gap-1">
+          ${adminOnly(`<td class="flex gap-1">
             ${r.status !== '已完成' && r.status !== '已取消' ? `
               <select class="text-xs border rounded px-1 py-0.5" onchange="assignRepair(${r.order_id}, this.value)">
                 <option value="">指派人员</option>
@@ -436,7 +534,7 @@ async function renderRepairs() {
               </select>
               <button class="btn btn-sm btn-success" onclick="completeRepair(${r.order_id})">完成</button>
             ` : ''}
-          </td>
+          </td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -472,17 +570,17 @@ async function renderComplaints() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 条</span>
-      <button class="btn btn-primary" onclick="addComplaintForm()"><i class="ri-add-line"></i>新增</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addComplaintForm()">➕ 新增</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>类型</th><th>标题</th><th>住户</th><th>状态</th><th>回复</th><th>时间</th><th>操作</th></tr>
+        <tr><th>ID</th><th>类型</th><th>标题</th><th>住户</th><th>状态</th><th>回复</th><th>时间</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(c => `<tr>
           <td>${c.complaint_id}</td><td>${badge(c.complaint_type)}</td><td class="font-medium">${c.title}</td>
           <td>${c.resident_name}</td><td>${badge(c.status)}</td>
           <td class="max-w-[200px] truncate text-xs">${c.reply || '-'}</td>
           <td class="text-xs">${new Date(c.created_at).toLocaleDateString()}</td>
-          <td>${c.status !== '已解决' && c.status !== '已关闭' ? `<button class="btn btn-sm btn-success" onclick="resolveComplaint(${c.complaint_id})">解决</button>` : ''}</td>
+          ${adminOnly(`<td>${c.status !== '已解决' && c.status !== '已关闭' ? `<button class="btn btn-sm btn-success" onclick="resolveComplaint(${c.complaint_id})">解决</button>` : ''}</td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -516,7 +614,7 @@ async function renderAnnouncements() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 条</span>
-      <button class="btn btn-primary" onclick="addAnnouncementForm()"><i class="ri-add-line"></i>发布公告</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addAnnouncementForm()">➕ 发布公告</button>')}
     </div>
     <div class="space-y-3">
       ${data.map(a => `
@@ -528,8 +626,8 @@ async function renderAnnouncements() {
               <span class="font-semibold">${a.title}</span>
             </div>
             <div>
-              <button class="btn btn-sm btn-primary" onclick="editAnnouncementForm(${a.announcement_id})">编辑</button>
-              <button class="btn btn-sm btn-danger" onclick="delAnnouncement(${a.announcement_id})">删除</button>
+              ${adminOnly(`<button class="btn btn-sm btn-primary" onclick="editAnnouncementForm(${a.announcement_id})">编辑</button>
+              <button class="btn btn-sm btn-danger" onclick="delAnnouncement(${a.announcement_id})">删除</button>`)}
             </div>
           </div>
           <p class="text-sm text-gray-600 mt-2 leading-relaxed">${a.content}</p>
@@ -579,17 +677,17 @@ async function renderVisitors() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 条</span>
-      <button class="btn btn-primary" onclick="addVisitorForm()"><i class="ri-add-line"></i>登记访客</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addVisitorForm()">➕ 登记访客</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>访客姓名</th><th>电话</th><th>来访目的</th><th>被访住户</th><th>地址</th><th>进入时间</th><th>离开时间</th><th>操作</th></tr>
+        <tr><th>ID</th><th>访客姓名</th><th>电话</th><th>来访目的</th><th>被访住户</th><th>地址</th><th>进入时间</th><th>离开时间</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(v => `<tr>
           <td>${v.visitor_id}</td><td class="font-medium">${v.visitor_name}</td><td>${v.visitor_phone || '-'}</td>
           <td>${badge(v.purpose)}</td><td>${v.resident_name}</td><td class="text-xs">${v.full_address}</td>
           <td class="text-xs">${new Date(v.entry_time).toLocaleString('zh-CN')}</td>
           <td class="text-xs">${v.exit_time ? new Date(v.exit_time).toLocaleString('zh-CN') : '<span class="text-orange-500">未离开</span>'}</td>
-          <td>${!v.exit_time ? `<button class="btn btn-sm btn-success" onclick="visitorExit(${v.visitor_id})">登记离开</button>` : ''}</td>
+          ${adminOnly(`<td>${!v.exit_time ? `<button class="btn btn-sm btn-success" onclick="visitorExit(${v.visitor_id})">登记离开</button>` : ''}</td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -618,16 +716,16 @@ async function renderStaff() {
   content().innerHTML = `
     <div class="flex justify-between items-center mb-4">
       <span class="text-sm text-gray-500">共 ${data.length} 人</span>
-      <button class="btn btn-primary" onclick="addStaffForm()"><i class="ri-add-line"></i>新增员工</button>
+      ${adminOnly('<button class="btn btn-primary" onclick="addStaffForm()">➕ 新增员工</button>')}
     </div>
     <div class="card overflow-x-auto">
       <table class="data-table">
-        <tr><th>ID</th><th>姓名</th><th>性别</th><th>电话</th><th>岗位</th><th>薪资</th><th>入职日期</th><th>状态</th><th>操作</th></tr>
+        <tr><th>ID</th><th>姓名</th><th>性别</th><th>电话</th><th>岗位</th><th>薪资</th><th>入职日期</th><th>状态</th>${currentUser?.role === 'admin' ? '<th>操作</th>' : ''}</tr>
         ${data.map(s => `<tr>
           <td>${s.staff_id}</td><td class="font-medium">${s.name}</td><td>${badge(s.gender)}</td>
           <td>${s.phone}</td><td>${badge(s.role)}</td><td>¥${s.salary}</td>
           <td>${s.hire_date}</td><td>${badge(s.status)}</td>
-          <td><button class="btn btn-sm btn-primary" onclick="editStaffForm(${s.staff_id})">编辑</button> ${s.status === '在职' ? `<button class="btn btn-sm btn-danger" onclick="resignStaff(${s.staff_id})">离职</button>` : ''}</td>
+          ${adminOnly(`<td><button class="btn btn-sm btn-primary" onclick="editStaffForm(${s.staff_id})">编辑</button> ${s.status === '在职' ? `<button class="btn btn-sm btn-danger" onclick="resignStaff(${s.staff_id})">离职</button>` : ''}</td>`)}
         </tr>`).join('')}
       </table>
     </div>`;
@@ -667,4 +765,4 @@ async function editStaffForm(id) {
 }
 
 // ======================== 初始化 ========================
-loadPage('dashboard');
+checkAuth();

@@ -2,15 +2,42 @@
 社区物业管理系统 - Flask后端
 数据库课程设计作品
 """
-from flask import Flask, jsonify, request, render_template, send_from_directory
+from flask import Flask, jsonify, request, render_template, send_from_directory, session
 from flask_cors import CORS
 import pymysql
-from config import DB_CONFIG
+from config import DB_CONFIG, SECRET_KEY
 from datetime import date, datetime
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 import decimal
+import json
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
-CORS(app)
+app.secret_key = SECRET_KEY
+CORS(app, supports_credentials=True)
+
+
+# ======================== 认证装饰器 ========================
+def login_required(f):
+    """要求用户已登录"""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if 'user_id' not in session:
+            return err('请先登录', 401)
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(f):
+    """要求管理员权限（写操作）"""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if 'user_id' not in session:
+            return err('请先登录', 401)
+        if session.get('role') != 'admin':
+            return err('权限不足，仅管理员可操作', 403)
+        return f(*args, **kwargs)
+    return wrapper
 
 
 # ======================== 数据库工具 ========================
@@ -47,7 +74,6 @@ def err(msg, code=500):
     return ok({'error': msg}), code
 
 
-import json
 
 
 # ======================== 首页 ========================
@@ -56,8 +82,59 @@ def index():
     return render_template('index.html')
 
 
+# ======================== 认证 API ========================
+@app.route('/api/login', methods=['POST'])
+def login():
+    db = get_db()
+    try:
+        d = request.json
+        username = d.get('username', '').strip()
+        password = d.get('password', '')
+        if not username or not password:
+            return err('用户名和密码不能为空', 400)
+        cur = db.cursor()
+        cur.execute('SELECT * FROM users WHERE username = %s', (username,))
+        user = cur.fetchone()
+        if not user or not check_password_hash(user['password_hash'], password):
+            return err('用户名或密码错误', 401)
+        session['user_id'] = user['user_id']
+        session['username'] = user['username']
+        session['role'] = user['role']
+        session['nickname'] = user['nickname'] or user['username']
+        return ok({
+            'user_id': user['user_id'],
+            'username': user['username'],
+            'role': user['role'],
+            'nickname': user['nickname'] or user['username'],
+            'message': '登录成功'
+        })
+    except Exception as e:
+        return err(str(e))
+    finally:
+        db.close()
+
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return ok({'message': '已退出登录'})
+
+
+@app.route('/api/me')
+def get_me():
+    if 'user_id' not in session:
+        return ok({'user_id': None})
+    return ok({
+        'user_id': session['user_id'],
+        'username': session['username'],
+        'role': session['role'],
+        'nickname': session.get('nickname', session['username'])
+    })
+
+
 # ======================== 控制台统计 ========================
 @app.route('/api/dashboard')
+@login_required
 def dashboard():
     db = get_db()
     try:
@@ -91,6 +168,7 @@ def dashboard():
 
 # ======================== 楼栋管理 ========================
 @app.route('/api/buildings')
+@login_required
 def get_buildings():
     db = get_db()
     try:
@@ -110,6 +188,7 @@ def get_buildings():
 
 
 @app.route('/api/buildings', methods=['POST'])
+@admin_required
 def add_building():
     db = get_db()
     try:
@@ -126,6 +205,7 @@ def add_building():
 
 
 @app.route('/api/buildings/<int:id>', methods=['PUT'])
+@admin_required
 def update_building(id):
     db = get_db()
     try:
@@ -142,6 +222,7 @@ def update_building(id):
 
 
 @app.route('/api/buildings/<int:id>', methods=['DELETE'])
+@admin_required
 def del_building(id):
     db = get_db()
     try:
@@ -157,6 +238,7 @@ def del_building(id):
 
 # ======================== 单元管理 ========================
 @app.route('/api/units')
+@login_required
 def get_units():
     db = get_db()
     try:
@@ -176,6 +258,7 @@ def get_units():
 
 
 @app.route('/api/units', methods=['POST'])
+@admin_required
 def add_unit():
     db = get_db()
     try:
@@ -193,6 +276,7 @@ def add_unit():
 
 # ======================== 房屋管理 ========================
 @app.route('/api/rooms')
+@login_required
 def get_rooms():
     db = get_db()
     try:
@@ -213,6 +297,7 @@ def get_rooms():
 
 
 @app.route('/api/rooms', methods=['POST'])
+@admin_required
 def add_room():
     db = get_db()
     try:
@@ -230,6 +315,7 @@ def add_room():
 
 # ======================== 住户管理 ========================
 @app.route('/api/residents')
+@login_required
 def get_residents():
     db = get_db()
     try:
@@ -251,6 +337,7 @@ def get_residents():
 
 
 @app.route('/api/residents', methods=['POST'])
+@admin_required
 def add_resident():
     db = get_db()
     try:
@@ -270,6 +357,7 @@ def add_resident():
 
 
 @app.route('/api/residents/<int:id>', methods=['PUT'])
+@admin_required
 def update_resident(id):
     db = get_db()
     try:
@@ -290,6 +378,7 @@ def update_resident(id):
 
 
 @app.route('/api/residents/<int:id>/overview')
+@login_required
 def resident_overview(id):
     db = get_db()
     try:
@@ -314,6 +403,7 @@ def resident_overview(id):
 
 # ======================== 车位管理 ========================
 @app.route('/api/parking')
+@login_required
 def get_parking():
     db = get_db()
     try:
@@ -333,6 +423,7 @@ def get_parking():
 
 
 @app.route('/api/parking/stats')
+@login_required
 def parking_stats():
     db = get_db()
     try:
@@ -351,6 +442,7 @@ def parking_stats():
 
 # ======================== 车辆登记 ========================
 @app.route('/api/vehicles')
+@login_required
 def get_vehicles():
     db = get_db()
     try:
@@ -370,6 +462,7 @@ def get_vehicles():
 
 
 @app.route('/api/vehicles', methods=['POST'])
+@admin_required
 def add_vehicle():
     db = get_db()
     try:
@@ -389,6 +482,7 @@ def add_vehicle():
 
 
 @app.route('/api/vehicles/<int:id>', methods=['PUT'])
+@admin_required
 def update_vehicle(id):
     db = get_db()
     try:
@@ -410,6 +504,7 @@ def update_vehicle(id):
 
 # ======================== 物业费管理 ========================
 @app.route('/api/fees')
+@login_required
 def get_fees():
     db = get_db()
     try:
@@ -439,6 +534,7 @@ def get_fees():
 
 
 @app.route('/api/fees/pay', methods=['POST'])
+@admin_required
 def pay_fee():
     db = get_db()
     try:
@@ -455,6 +551,7 @@ def pay_fee():
 
 
 @app.route('/api/fees/generate', methods=['POST'])
+@admin_required
 def generate_fees():
     db = get_db()
     try:
@@ -471,6 +568,7 @@ def generate_fees():
 
 
 @app.route('/api/fees/report/<period>')
+@login_required
 def fee_report(period):
     db = get_db()
     try:
@@ -484,6 +582,7 @@ def fee_report(period):
 
 
 @app.route('/api/fee-categories')
+@login_required
 def get_fee_categories():
     db = get_db()
     try:
@@ -498,6 +597,7 @@ def get_fee_categories():
 
 # ======================== 报修工单 ========================
 @app.route('/api/repairs')
+@login_required
 def get_repairs():
     db = get_db()
     try:
@@ -522,6 +622,7 @@ def get_repairs():
 
 
 @app.route('/api/repairs', methods=['POST'])
+@admin_required
 def add_repair():
     db = get_db()
     try:
@@ -541,6 +642,7 @@ def add_repair():
 
 
 @app.route('/api/repairs/<int:id>', methods=['PUT'])
+@admin_required
 def update_repair(id):
     db = get_db()
     try:
@@ -559,6 +661,7 @@ def update_repair(id):
 
 # ======================== 投诉建议 ========================
 @app.route('/api/complaints')
+@login_required
 def get_complaints():
     db = get_db()
     try:
@@ -577,6 +680,7 @@ def get_complaints():
 
 
 @app.route('/api/complaints', methods=['POST'])
+@admin_required
 def add_complaint():
     db = get_db()
     try:
@@ -595,6 +699,7 @@ def add_complaint():
 
 
 @app.route('/api/complaints/<int:id>', methods=['PUT'])
+@admin_required
 def update_complaint(id):
     db = get_db()
     try:
@@ -612,6 +717,7 @@ def update_complaint(id):
 
 # ======================== 公告管理 ========================
 @app.route('/api/announcements')
+@login_required
 def get_announcements():
     db = get_db()
     try:
@@ -625,6 +731,7 @@ def get_announcements():
 
 
 @app.route('/api/announcements', methods=['POST'])
+@admin_required
 def add_announcement():
     db = get_db()
     try:
@@ -644,6 +751,7 @@ def add_announcement():
 
 
 @app.route('/api/announcements/<int:id>', methods=['PUT'])
+@admin_required
 def update_announcement(id):
     db = get_db()
     try:
@@ -664,6 +772,7 @@ def update_announcement(id):
 
 
 @app.route('/api/announcements/<int:id>', methods=['DELETE'])
+@admin_required
 def del_announcement(id):
     db = get_db()
     try:
@@ -679,6 +788,7 @@ def del_announcement(id):
 
 # ======================== 访客登记 ========================
 @app.route('/api/visitors')
+@login_required
 def get_visitors():
     db = get_db()
     try:
@@ -701,6 +811,7 @@ def get_visitors():
 
 
 @app.route('/api/visitors', methods=['POST'])
+@admin_required
 def add_visitor():
     db = get_db()
     try:
@@ -720,6 +831,7 @@ def add_visitor():
 
 
 @app.route('/api/visitors/<int:id>/exit', methods=['PUT'])
+@admin_required
 def visitor_exit(id):
     db = get_db()
     try:
@@ -735,6 +847,7 @@ def visitor_exit(id):
 
 # ======================== 工作人员 ========================
 @app.route('/api/staff')
+@login_required
 def get_staff():
     db = get_db()
     try:
@@ -748,6 +861,7 @@ def get_staff():
 
 
 @app.route('/api/staff', methods=['POST'])
+@admin_required
 def add_staff():
     db = get_db()
     try:
@@ -767,6 +881,7 @@ def add_staff():
 
 
 @app.route('/api/staff/<int:id>', methods=['PUT'])
+@admin_required
 def update_staff(id):
     db = get_db()
     try:
@@ -789,7 +904,33 @@ def update_staff(id):
         db.close()
 
 
+# ======================== 初始化默认用户 ========================
+def init_default_users():
+    """首次启动时自动创建默认账户"""
+    db = get_db()
+    try:
+        cur = db.cursor()
+        cur.execute('SELECT COUNT(*) as c FROM users')
+        if cur.fetchone()['c'] > 0:
+            return
+        users = [
+            ('admin', generate_password_hash('admin123'), 'admin', '管理员'),
+            ('user',  generate_password_hash('user123'),  'user',  '普通用户'),
+        ]
+        cur.executemany(
+            'INSERT INTO users (username, password_hash, role, nickname) VALUES (%s,%s,%s,%s)',
+            users
+        )
+        db.commit()
+        print('已创建默认账户: admin/admin123, user/user123')
+    except Exception as e:
+        print(f'初始化用户失败: {e}')
+    finally:
+        db.close()
+
+
 # ======================== 启动 ========================
 if __name__ == '__main__':
+    init_default_users()
     print('社区物业管理系统已启动: http://localhost:5000')
     app.run(debug=True, host='0.0.0.0', port=5000)
